@@ -16,7 +16,7 @@ It supports massive parallelization to verify Lean 4 proofs at scale.
 Clone this repository and change directory:
 
 ```sh
-git clone git@github.com:project-numina/kimina-lean-server.git
+git clone https://github.com/gauss5930/kimina-lean-server.git
 cd kimina-lean-server
 ```
 
@@ -70,6 +70,7 @@ Set Up the Lean Environment:
 
 ```sh
 bash setup.sh
+source $HOME/.elan/env
 ```
 
 This script installs Lean 4 and builds `mathlib4` and `repl` in the current working directory.

@@ -202,6 +202,8 @@ def analyze_sample(lean_feedback: dict):
 
 def analyze(result: List[dict]):
     df = pandas.DataFrame([analyze_sample(sample_result) for sample_result in result])
+    res_output = pandas.DataFrame(result)
+    res_output["valid"] = list(df["is_valid_no_sorry"])
 
     # % of proof which compiled and do not contain a sorry.
     valid_rate = df["is_valid_no_sorry"].sum() / len(df)
@@ -226,3 +228,5 @@ def analyze(result: List[dict]):
         print(
             f"Average verification time: {avg_time:.2f} seconds per successful verification"
         )
+
+    return res_output
