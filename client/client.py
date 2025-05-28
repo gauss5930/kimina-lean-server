@@ -3,6 +3,7 @@ import logging
 import os
 from urllib.parse import urljoin, urlparse, urlunparse
 from typing import List
+from tqdm import tqdm
 
 import aiohttp
 from loguru import logger
@@ -211,37 +212,47 @@ async def process_batch(batch, client: Lean4Client, timeout, infotree_type, sema
 
 async def process_batches(
     client,
-    batches: List[List[dict]],
-    timeout=60,
-    num_proc=os.cpu_count(),
-    infotree_type=None,
+    batches: list[list[dict]],
+    timeout: int = 60,
+    num_proc: int = os.cpu_count(),
+    infotree_type: str | None = None,
 ):
-    """Process multiple batches of proofs concurrently.
+    max_pending = num_proc * 5
 
-    Args:
-        client (Lean4Client): The Lean4 client instance.
-        batches (List[List[dict]]): List of batches, where each batch is a list of samples.
-        timeout (int, optional): Timeout in seconds for each batch. Defaults to 60.
-        num_proc (int, optional): Maximum number of concurrent processes. Defaults to CPU count.
-        infotree_type (str, optional): Type of info tree to use. Defaults to None.
-
-    Returns:
-        List[dict]: Combined results from all batches.
-    """
     semaphore = asyncio.Semaphore(num_proc)
+    results: list[dict] = []
+    batch_iter = iter(batches)
 
-    results = []
+    pending: set[asyncio.Task] = set()
+    for _ in range(min(max_pending, len(batches))):
+        batch = next(batch_iter)
+        pending.add(
+            asyncio.create_task(
+                process_batch(batch, client, timeout, infotree_type, semaphore)
+            )
+        )
 
-    coros = [
-        process_batch(batche, client, timeout, infotree_type, semaphore)
-        for batche in batches
-    ]
+    with tqdm(total=len(batches), desc="Verifying proofs") as pbar:
+        while pending:
+            done, pending = await asyncio.wait(
+                pending,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
 
-    for fut in tqdm_asyncio.as_completed(
-        coros, total=len(batches), desc="Verifying proofs"
-    ):
-        result = await fut
-        results.extend(result["results"])
+            for task in done:
+                resp = task.result()
+                results.extend(resp["results"])
+                pbar.update(1)
+
+                try:
+                    batch = next(batch_iter)
+                    pending.add(
+                        asyncio.create_task(
+                            process_batch(batch, client, timeout, infotree_type, semaphore)
+                        )
+                    )
+                except StopIteration:
+                    pass
 
     return results
 
