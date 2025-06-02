@@ -7,6 +7,11 @@ from datasets import load_dataset
 
 from client.client import Lean4Client, batch_verify_proof
 from utils.proof_utils import analyze
+from more_itertools import batched
+from tqdm.auto import tqdm, trange
+
+
+os.makedirs("prove_result", exist_ok=True)
 
 
 def format_header(row):
@@ -43,7 +48,7 @@ def benchmark_api(client, data_path: str, timeout: int, batch_size: int, num_pro
     Returns:
         None: Results are printed to stdout by the analyze function.
     """
-    dataset = load_dataset(data_path, split="train").to_pandas().iloc[:100]
+    dataset = load_dataset(data_path, split="train").to_pandas()
     dataset["lean4"] = [formatting(row) for _,row in dataset.iterrows()]
     
     samples = [
@@ -51,32 +56,37 @@ def benchmark_api(client, data_path: str, timeout: int, batch_size: int, num_pro
         for i,row in dataset.iterrows()
     ]
 
-    result = batch_verify_proof(
-        samples=samples,
-        client=client,
-        timeout=timeout,
-        num_proc=num_proc,
-        batch_size=batch_size,
-    )
+    for n,batch in tqdm(enumerate(batched(samples, 1000)), total=int(len(samples) // 1000)):
 
-    res_output = pd.DataFrame(result)
-    res_output = res_output.sort_values(
-        by='custom_id',
-        key=lambda x: x.str.split('_').str[-1].astype(int),
-        ascending=True
-    )
+        sample_dataset = dataset.iloc[n*1000:(n+1)*1000]
+        sample_dataset = sample_dataset.reset_index(inplace=True, drop=True)
 
-    analyze_output = analyze([dict(row) for _,row in res_output.iterrows()])
-
-    dataset["validation_response"] = list(analyze_output["response"])
-    dataset["valid"] = [row["lean4"] if row["lean4"] in ["lean_cutoff", "generation_cutoff"] else analyze_output.loc[i, "valid"] for i,row in dataset.iterrows()]
-    dataset.to_json("analyze_result.jsonl", lines=True, orient="records")
+        result = batch_verify_proof(
+            samples=batch,
+            client=client,
+            timeout=timeout,
+            num_proc=num_proc,
+            batch_size=batch_size,
+        )
+    
+        res_output = pd.DataFrame(result)
+        res_output = res_output.sort_values(
+            by='custom_id',
+            key=lambda x: x.str.split('_').str[-1].astype(int),
+            ascending=True
+        )
+    
+        analyze_output = analyze([dict(row) for _,row in res_output.iterrows()])
+    
+        sample_dataset["validation_response"] = list(analyze_output["response"])
+        sample_dataset["valid"] = [row["lean4"] if row["lean4"] in ["lean_cutoff", "generation_cutoff"] else analyze_output.loc[i, "valid"] for i,row in sample_dataset.iterrows()]
+        sample_dataset.to_json(os.path.join("prove_result", f"analyze_result_{n}.jsonl"), lines=True, orient="records")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_path", type=str, default="Cartinoe5930/DeepSeek-Prover-V2-generation")
-    parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--url", type=str, default="http://127.0.0.1:12332")
     args = parser.parse_args()
